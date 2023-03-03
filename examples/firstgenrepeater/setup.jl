@@ -50,6 +50,10 @@ function simulation_setup(
         network[v,:enttrackers] = Any[nothing for i in 1:sizes[v]]
         # Create an array of locks, telling us whether a qubit is undergoing an operation
         network[v,:locks] = [Resource(sim,1) for i in 1:sizes[v]]
+        # Create an event, to notify whether a qubit is prime for swapping
+        network[v, :prime_for_swapping] = Event(sim)
+        # Create a channel, to convey what qubit pairs are available for swapping
+        network[v, :qubit_pairs] = Channel(1)
     end
 
     sim, network
@@ -92,6 +96,8 @@ const YY = Y⊗Y
         network[nodea,:enttrackers][ia] = (node=nodeb,slot=ib)
         network[nodeb,:enttrackers][ib] = (node=nodea,slot=ia)
         @simlog sim "entangled node $(nodea):$(ia) and node $(nodeb):$(ib)"
+        findswapablequbits(network, nodea)
+        findswapablequbits(network, nodeb)
         release(locka)
         release(lockb)
     end
@@ -103,6 +109,21 @@ function findfreequbit(network, node)
     locks = network[node,:locks]
     regsize = nsubsystems(register)
     findfirst(i->!isassigned(register,i) & isfree(locks[i]), 1:regsize)
+end
+
+function findswapablequbits(network,node)
+    enttrackers = network[node,:enttrackers]
+    locks = network[node,:locks]
+    left_nodes  = [(i=i,n...) for (i,n) in enumerate(enttrackers)
+                   if !isnothing(n) && n.node<node && isfree(locks[i])]
+    isempty(left_nodes)  && return nothing
+    right_nodes = [(i=i,n...) for (i,n) in enumerate(enttrackers)
+                   if !isnothing(n) && n.node>node && isfree(locks[i])]
+    isempty(right_nodes) && return nothing
+    _, farthest_left  = findmin(n->n.node, left_nodes)
+    _, farthest_right = findmax(n->n.node, right_nodes)
+    put!(network[node,:qubit_pairs], (left_nodes[farthest_left].i, right_nodes[farthest_right].i))
+    succeed(network[node,:prime_for_swapping])
 end
 
 ##
@@ -117,12 +138,8 @@ end
     swapper_busy_time # How long it takes to perform the swap
     )
     while true
-        qubit_pair = findswapablequbits(network,node)
-        if isnothing(qubit_pair)
-            @yield timeout(sim, swapper_wait_time)
-            continue
-        end
-        q1, q2 = qubit_pair
+        @yield network[node, :prime_for_swapping]
+        q1, q2 = take!(network[node, :qubit_pairs])
         locks = network[node, :locks][[q1,q2]]
         @yield mapreduce(request, &, locks)
         reg = network[node]
@@ -151,20 +168,6 @@ function swapcircuit(localslot1, localslot2, remslot1, remslot2; time=nothing)
     if zmeas==2
         apply!(remslot2, X)
     end
-end
-
-function findswapablequbits(network,node)
-    enttrackers = network[node,:enttrackers]
-    locks = network[node,:locks]
-    left_nodes  = [(i=i,n...) for (i,n) in enumerate(enttrackers)
-                   if !isnothing(n) && n.node<node && isfree(locks[i])]
-    isempty(left_nodes)  && return nothing
-    right_nodes = [(i=i,n...) for (i,n) in enumerate(enttrackers)
-                   if !isnothing(n) && n.node>node && isfree(locks[i])]
-    isempty(right_nodes) && return nothing
-    _, farthest_left  = findmin(n->n.node, left_nodes)
-    _, farthest_right = findmax(n->n.node, right_nodes)
-    return left_nodes[farthest_left].i, right_nodes[farthest_right].i
 end
 
 ##

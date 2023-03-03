@@ -1,7 +1,7 @@
 include("setup.jl")
 
-using GLMakie # For plotting
-GLMakie.activate!()
+#using GLMakie # For plotting
+#GLMakie.activate!()
 
 ##
 # Demo all three components, Entangler, Swapper, and Purifer working together
@@ -36,12 +36,14 @@ end
 # set up a plot and save a handle to the plot observable
 fig = Figure(resolution=(400,400))
 _,ax,_,obs = registernetplot_axis(fig[1,1],network)
-display(fig)
+#display(fig)
 
 # record the simulation progress
 step_ts = range(0, 30, step=0.1)
-record(fig, "firstgenrepeater-05.purifier.mp4", step_ts, framerate=10) do t
+#record(fig, "firstgenrepeater-05.purifier.mp4", step_ts, framerate=10) do t
+for t in step_ts
     run(sim, t)
-    notify(obs)
-    ax.title = "t=$(t)"
+end
+notify(obs)
+#ax.title = "t=$(t)"
 end
