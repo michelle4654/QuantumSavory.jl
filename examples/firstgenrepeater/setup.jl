@@ -50,10 +50,8 @@ function simulation_setup(
         network[v,:enttrackers] = Any[nothing for i in 1:sizes[v]]
         # Create an array of locks, telling us whether a qubit is undergoing an operation
         network[v,:locks] = [Resource(sim,1) for i in 1:sizes[v]]
-        # Create an event, to notify whether a qubit is prime for swapping
-        network[v, :prime_for_swapping] = Event(sim)
         # Create a channel, to convey what qubit pairs are available for swapping
-        network[v, :qubit_pairs] = Channel(1)
+        network[v, :qubit_pairs] = Store{Any}(sim)
     end
 
     sim, network
@@ -122,8 +120,7 @@ function findswapablequbits(network,node)
     isempty(right_nodes) && return nothing
     _, farthest_left  = findmin(n->n.node, left_nodes)
     _, farthest_right = findmax(n->n.node, right_nodes)
-    put!(network[node,:qubit_pairs], (left_nodes[farthest_left].i, right_nodes[farthest_right].i))
-    succeed(network[node,:prime_for_swapping])
+    put(network[node,:qubit_pairs], (left_nodes[farthest_left].i, right_nodes[farthest_right].i))
 end
 
 ##
@@ -138,8 +135,8 @@ end
     swapper_busy_time # How long it takes to perform the swap
     )
     while true
-        @yield network[node, :prime_for_swapping]
-        q1, q2 = take!(network[node, :qubit_pairs])
+        q1q2 = @yield get(network[node, :qubit_pairs])
+        q1, q2 = q1q2
         locks = network[node, :locks][[q1,q2]]
         @yield mapreduce(request, &, locks)
         reg = network[node]
